@@ -1,0 +1,10 @@
+services:
+  app:
+    build: .
+    volumes:
+      - .:/app
+    working_dir: /app
+    security_opt:
+      - seccomp:unconfined
+    cap_add:
+      - SYS_PTRACE
