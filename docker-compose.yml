@@ -1,6 +1,8 @@
 services:
-  app:
-    build: .
+  x86_64: &app
+    build: 
+      context: .
+      dockerfile: Dockerfile
     volumes:
       - .:/app
     working_dir: /app
@@ -8,3 +10,9 @@ services:
       - seccomp:unconfined
     cap_add:
       - SYS_PTRACE
+
+  x86_32: 
+    <<: *app
+    build: 
+      context: .
+      dockerfile: Dockerfile.x86_32

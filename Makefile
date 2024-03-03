@@ -1,11 +1,9 @@
 bash:
-	@docker compose run app bash
-
-dump:
-	@docker compose run app bash -c "bin/dump.bash $(s)"
+	@docker compose run $(a) bash # make bash a=x86_64 (or x86_32)
 
 run:
-	@docker compose run app bash -c "bin/run.bash $(s)"
+	@docker compose run $(a) bash -c "bin/run.bash $(s) $(a)" # make run a=x86_64 s=hello
 
-gdb:
-	@docker compose run app bash -c "bin/gdb.bash $(s)"
+hello.world:
+	@docker compose run x86_32 bash -c "bin/run.bash hello x86_32" 
+	@docker compose run x86_64 bash -c "bin/run.bash hello x86_64" 
