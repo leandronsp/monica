@@ -3,6 +3,7 @@ global _start
 %define SYS_mmap2 192 ; allocate memory
 %define SYS_clone 120 ; create thread
 %define SYS_wait4 114 ; wait thread
+%define SYS_nanosleep 162 ; sleep thread
 %define SYS_write 4   ; write
 %define SYS_exit 1    ; exit
 
@@ -33,26 +34,60 @@ output: resb 8
 
 section .text
 _start:
+   ; sync
+   ;call threadfn
+   ;call threadfn
+
+   ; threaded
    mov ebx, threadfn
    call pthread
+   mov edx, eax
+   call wthread
 
-   ;mov edx, eax
-   ;call wthread
+   mov ebx, threadfn
+   call pthread
+   mov edx, eax
+   call wthread
 
 exit:
    xor ebx, ebx
    mov eax, SYS_exit
    int 0x80
 
-;wthread:
-;   mov ebx, edx
-;   mov ecx, esp
-;   mov edx, 0x0
-;   mov esi, 0x0
-;   mov eax, SYS_wait4
-;   int 0x80
-;   ret
+wthread:
+   mov ebx, edx ; edx contains the child PID
+   mov ecx, esp
+   mov edx, 0x0
+   mov esi, 0x0
+   mov eax, SYS_wait4
+   int 0x80
+   ret
 
+threadfn:
+   mov ebx, 2
+   call sleep
+   
+   ; print to STDOUT
+   mov [output], dword "HOY!"
+   mov [output + 4], byte 0xA
+   mov ebx, STDOUT
+   mov ecx, output
+   mov edx, 8
+   mov eax, SYS_write
+   int 0x80
+   jmp exit
+
+sleep:
+   ; nanosleep(seconds)
+   push 0
+   push ebx
+   mov ebx, esp
+   mov eax, SYS_nanosleep
+   int 0x80
+   pop ebp
+   pop ebp
+   ret
+   
 pthread:
    ; pushes the function pointer (threadfn) onto the stack (esp)
    push ebx
@@ -73,13 +108,3 @@ pthread:
    mov eax, SYS_clone
    int 0x80
    ret
-
-threadfn:
-   mov [output], dword "HEY!"
-   mov [output + 4], byte 0xA
-   mov ebx, STDOUT
-   mov ecx, output
-   mov edx, 8
-   mov eax, SYS_write
-   int 0x80
-   jmp exit
