@@ -42,15 +42,12 @@ global _start
 
 section .bss
 sockfd: resd 1
+clientfd: resd 1
 
 section .text
 listenMsg: db "Listening to the port 3000", 0xA, 0
 listenMsgLen: equ $- listenMsg
 _start:	            
-   ; start thread pool (5)
-      ; dequeue clientfd from the queue
-      ; handle(clientfd)
-
    call _socket
    mov [sockfd], eax
 
@@ -69,9 +66,11 @@ _start:
    mov esi, 0x0
    mov eax, SYS_accept4
    int 0x80
+   mov [clientfd], eax
 
-   ; enqueue eax (clientfd) in the queue
-   
+   mov ebx, _thandle
+   call _pthread
+
    jmp .accept
 
 _socket:
@@ -111,21 +110,22 @@ _listen:
    js _error
    ret
 
+_thandle:
+   call _handle
+   jmp _exit
+
 response: db `HTTP/1.1 200 OK\r\nContent-Length: 22\r\n\r\n<h1>Hello, World!</h1>`, 0
 responseLen: equ $- response
 _handle:
    ; write in the client socket
-   push ebp
-   mov ebp, esp
-   mov ebx, [ebp + 8] ; clientfd
-   pop ebp
-
+   mov ebx, [clientfd]
    mov ecx, response
    mov edx, responseLen
    mov eax, SYS_write
    int 0x80
 
    ; close the client socket
+   mov ebx, [clientfd]
    mov eax, SYS_close
    int 0x80
    ret
@@ -146,6 +146,7 @@ _error:
    mov edx, errorLen
    mov eax, SYS_write
    int 0x80
+   jmp _exit
 
 _exit:
    ; exit(0)
@@ -153,23 +154,14 @@ _exit:
    mov eax, SYS_exit
    int 0x80
 
-; ======== Thread =======
-; =======================
-_thandle:
-   push edi
-   call _handle
-   pop ebp
-   jmp _exit
-
 _pthread:
-   ; main thread: stack contains function pointer
-   ; mov ebx, _thandle
+   ; pushes the function pointer (threadfn) onto the stack (esp)
    push ebx
 
    ; mmap2(addr*, int len, int prot, int flags)
    ; => eax: addr (4MB)
    mov ebx, 0x0
-   mov ecx, STACK_SIZE ; 4MB
+   mov ecx, STACK_SIZE
    mov edx, PROT_WRITE | PROT_READ
    mov esi, MAP_ANONYMOUS | MAP_PRIVATE | MAP_GROWSDOWN
    mov eax, SYS_mmap2
@@ -178,7 +170,7 @@ _pthread:
    ; clone(int flags, thread_stack*)
    mov ebx, THREAD_FLAGS
    lea ecx, [eax + STACK_SIZE - 8] ; ecx -> 0xffffff (4MB)
-   pop dword [ecx]
+   pop dword [ecx] ; pop from esp -> ecx -> function pointer
    mov eax, SYS_clone
    int 0x80
    ret
