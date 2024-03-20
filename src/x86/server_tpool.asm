@@ -53,10 +53,10 @@ queue: dd QUEUE_SIZE dup(0) ; initialize array with zero's
 front: dd 0 
 rear: dd 0 
 mutex: dd 1
+condvar: dd 0
 
 section .bss
 sockfd: resd 1
-condvar: resd 1
 
 section .text
 listenMsg: db "Listening to the port 3000", 0xA, 0
@@ -149,8 +149,9 @@ _thandle:
    je .wait
    jmp .handle_task
 .wait:
-   mov dword [condvar], condvar
    call _wait_condvar ; wait futex
+   mov eax, 158 ; sched_yield
+   int 0x80
    jmp .forever
 .handle_task:
    push edi
@@ -279,9 +280,10 @@ _wait_condvar:
    mov ebx, condvar
    cmp dword [ebx], 1
    je .done
-   mov ecx, FUTEX_WAIT
-   mov edx, 1
-   mov esi, -1
+   mov ecx, FUTEX_WAIT | FUTEX_PRIVATE_FLAG
+   mov edx, 0
+   xor esi, esi
+   xor edi, edi
    mov eax, SYS_futex
    int 0x80
    test eax, eax
@@ -294,6 +296,8 @@ _emit_signal:
    mov ebx, condvar
    mov ecx, FUTEX_WAKE | FUTEX_PRIVATE_FLAG
    mov edx, 0
+   xor esi, esi
+   xor edi, edi
    mov eax, SYS_futex
    int 0x80
    ret
