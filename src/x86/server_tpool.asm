@@ -1,3 +1,8 @@
+; This HTTP server works using a pool of threads.
+; When a new connection is established, the client connection (clientfd) is enqueued.
+; The queue uses two pointers and employs a mutex and condvar for synchronization.
+; Each thread in the pool waits in the queue through a futex until a new connection is enqueued.
+
 global _start
 
 ; Syscalls constants
@@ -19,11 +24,11 @@ global _start
 
 ; Socket constants
 %define AF_INET 0x2
-%define SOCK_STREAM 0x1
+%define SOCK_STREAM 0x1    ; AF_INET + STREAM = TCP
 %define SOCK_PROTOCOL 0x0
 %define SIN_ZERO 0x0
-%define IP_ADDRESS 0x0
-%define PORT 0xB80B ; 3000:big-endian
+%define IP_ADDRESS 0x0     ; 0.0.0.0
+%define PORT 0xB80B        ; 3000 (big-endian)
 %define BACKLOG 0x2
 
 ; Threading constants
@@ -31,8 +36,8 @@ global _start
 %define PROT_READ 0x1
 %define PROT_WRITE 0x2
 %define MAP_GROWSDOWN 0x100
-%define MAP_ANONYMOUS 0x0020
-%define MAP_PRIVATE 0x0002
+%define MAP_ANONYMOUS 0x0020     ; No file descriptor involved
+%define MAP_PRIVATE 0x0002       ; Do not share across processes
 %define CLONE_VM 0x00000100
 %define CLONE_FS 0x00000200
 %define CLONE_FILES 0x00000400
@@ -50,59 +55,31 @@ global _start
 
 section .data
 queue: dd QUEUE_SIZE dup(0) ; initialize array with zero's
-front: dd 0 
-rear: dd 0 
-mutex: dd 1
-condvar: dd 0
+front: dd 0		    ; the front pointer for connection queue
+rear: dd 0		    ; the rear pointer (size) for connection queue
+mutex: dd 1                 ; a shared variable to synchronize threads in spinlock
+condvar: dd 0               ; a shared variable to synchronize threads in futex
 
 section .bss
-sockfd: resd 1
+sockfd: resd 1 ; the socket file descriptor
 
 section .text
 listenMsg: db "Listening to the port 3000", 0xA, 0
 listenMsgLen: equ $- listenMsg
+; ==========================
+; ======== _start ==========
+; ==========================
 _start:	            
-   call _initialize
-   mov edi, 0
+   mov edi, 0           ; thread pool counter
 .pool:
-   mov ebx, _thandle
-   call _pthread
+   mov ebx, _thandle    ; save the function pointer to be used in the thread
+   call _pthread        ; create a new thread
    inc edi
-   cmp edi, 5
-   je .done
+   cmp edi, 5           ; pool size
+   je .socket
    jmp .pool
-.done:
-   call _socket
-   mov [sockfd], eax
-
-   call _bind
-   call _listen
-
-   ; print("Listening on the port 3000")
-   mov esi, listenMsg
-   mov edi, listenMsgLen
-   call _print
-.accept:
-   ; accept4(int fd, struct*, int, int)
-   mov ebx, [sockfd]
-   mov ecx, 0x0
-   mov edx, 0x0
-   mov esi, 0x0
-   mov eax, SYS_accept4
-   int 0x80
-
-   mov edi, eax
-   call _enqueue
-   jmp .accept
-
-_initialize:
-   mov dword [front], 0
-   mov dword [rear], 0
-   mov dword [mutex], 1
-   mov dword [condvar], 0
-   ret
-
-_socket:
+.socket:
+   ; open a new socket
    ; socket(int family, int type, int proto)
    mov ebx, AF_INET
    mov ecx, SOCK_STREAM
@@ -111,25 +88,28 @@ _socket:
    int 0x80
    test eax, eax
    js _error
-   ret
+   mov [sockfd], eax ; save the fd into memory
+.bind:
+   ; define the struct by pushing 16 bytes onto the stack
+   ; family, port, ip_addr, sin_zero
+   push dword SIN_ZERO    ; 4 bytes
+   push dword IP_ADDRESS  ; 4 bytes
+   push word PORT         ; 2 bytes
+   push word AF_INET      ; 2 bytes
 
-_bind:
+   ; bind socket to an IP address and Port
    ; bind(int fd, struct *str, int strlen)
-   push dword SIN_ZERO
-   push dword IP_ADDRESS
-   push word PORT
-   push word AF_INET
    mov ebx, [sockfd] 
    mov edx, 16
-   mov ecx, esp
+   mov ecx, esp       ; esp is the stack pointer, top AF_INET
    mov eax, SYS_bind
    int 0x80
-   add esp, 12
+
+   add esp, 12        ; pop 12 bytes from the stack
    test eax, eax
    js _error
-   ret
-
-_listen:
+.listen:
+   ; make socket to listen on the bound address
    ; listen(int fd, int backlog)
    mov ebx, [sockfd]
    mov ecx, BACKLOG
@@ -137,37 +117,56 @@ _listen:
    int 0x80
    test eax, eax
    js _error
-   ret
 
-_thandle:
-.forever:
-   mov eax, [rear]
-   cmp eax, 0
-   je .wait
-   call _dequeue
-   cmp edi, 0
-   je .wait
-   jmp .handle_task
-.wait:
-   call _wait_condvar ; wait futex
-   mov eax, 158 ; sched_yield
+   ; print "Listening on the port 3000" in STDOUT
+   mov esi, listenMsg
+   mov edi, listenMsgLen
+   call _print
+.accept:
+   ; block until a new connection is established
+   ; accept4(int fd, struct*, int, int)
+   mov ebx, [sockfd]
+   mov ecx, 0x0          
+   mov edx, 0x0
+   mov esi, 0x0
+   mov eax, SYS_accept4
    int 0x80
-   jmp .forever
+
+   mov edi, eax   ; save the client socket (eax) in the register (edi)
+   call _enqueue  ; enqueue the register
+   jmp .accept    ; repeat in loop
+
+
+; ============================
+; ======== _thandle ==========
+; ============================
+_thandle:
+   mov eax, [rear]    ; check queue size
+   cmp eax, 0         ; compare
+   je .wait           ; wait while queue is empty
+   call _dequeue      ; dequeue a connection (element is stored in edi)
+   jmp .handle_task   ; handle the task
+.wait:
+   call _wait_condvar ; wait on futex controlled by an integer (condvar)
+   jmp _thandle       ; repeat in loop
 .handle_task:
-   push edi
-   call _handle
-   pop ebp
-   jmp .forever
+   push edi           ; push edi (connection) onto the stack
+   call _handle       ; call the handle function
+   pop ebp            ; pop connection from the stack
+   jmp _thandle       ; repeat in loop
 
 response: db `HTTP/1.1 200 OK\r\nContent-Length: 22\r\n\r\n<h1>Hello, World!</h1>`, 0
 responseLen: equ $- response
+; ===========================
+; ======== _handle ==========
+; ===========================
 _handle:
-   ; write in the client socket
-   push ebp
-   mov ebp, esp
-   mov ebx, [ebp + 8] ; clientfd
-   pop ebp
+   push ebp               ; create a stack frame
+   mov ebp, esp           ; preserve base pointer
+   mov ebx, [ebp + 8]     ; 1st argument in the stack (connection)
+   pop ebp                ; drop stack frame
 
+   ; write response into the connection socket
    mov ecx, response
    mov edx, responseLen
    mov eax, SYS_write
@@ -200,12 +199,18 @@ _error:
    mov eax, SYS_exit_group
    int 0x80
 
+; ============================
+; ======== _pthread ==========
+; ============================
+; Creates a POSIX thread using a local stack
 _pthread:
-   ; pushes the function pointer (threadfn) onto the stack (esp)
+   ; ebx contains the function pointer (_thandle)
+   ; push the function pointer onto the stack
    push ebx
 
+   ; memory allocation (stack-like)
+   ; after syscall, 4MB will be allocated in the memory
    ; mmap2(addr*, int len, int prot, int flags)
-   ; => eax: addr (4MB)
    mov ebx, 0x0
    mov ecx, STACK_SIZE
    mov edx, PROT_WRITE | PROT_READ
@@ -213,77 +218,95 @@ _pthread:
    mov eax, SYS_mmap2
    int 0x80
 
+   ; thread creation
    ; clone(int flags, thread_stack*)
    mov ebx, THREAD_FLAGS
-   lea ecx, [eax + STACK_SIZE - 8] ; ecx -> 0xffffff (4MB)
-   pop dword [ecx] ; pop from esp -> ecx -> function pointer
+   lea ecx, [eax + STACK_SIZE - 8]     ; stack pointer for the thread
+   pop dword [ecx]                     ; pop function pointer into ecx (stack pointer)
    mov eax, SYS_clone
    int 0x80
    ret
 
+; ============================
+; ======== _enqueue ==========
+; ============================
+; Enqueue connections into the queue
 _enqueue:
-    call _lock_mutex
-    mov ebx, [rear]
-    mov dword [queue + ebx * 4], edi ; push into the queue
-    inc dword [rear] ; increment the rear pointer
-    call _emit_signal
-    call _unlock_mutex
-    ret
+   ; edi register contains the connection to be enqueued
 
+   call _lock_mutex                  ; spinlock in mutex
+   mov ebx, [rear]                   ; preserve rear pointer
+   mov dword [queue + ebx * 4], edi  ; enqueue the connection
+   inc dword [rear]                  ; increment the rear pointer (size)
+   call _emit_signal                 ; futex wake the any suspended thread
+   call _unlock_mutex                ; unlock mutex
+   ret
+
+; ============================
+; ======== _dequeue ==========
+; ============================
+; Dequeue connections from the queue
 _dequeue:
-   call _lock_mutex
-   xor ebx, ebx
-   xor edi, edi
-   xor edx, edx
-
-   lea ecx, [queue] ; load effective address into ecx so we can manipulate the register
-   mov ebx, [front] ; pointer into ebx
-
-   cmp ebx, [rear]
-   je .empty
-
-   mov edi, dword [ecx + ebx * 4] ; get the 1st element
+   call _lock_mutex                 ; spinlock in mutex
+   xor ebx, ebx                     ; clear register
+   xor edi, edi                     ; clear register
+   xor edx, edx                     ; clear register
+   lea ecx, [queue]                 ; load queue address into ecx
+   mov ebx, [front]                 ; current pointer
+   cmp ebx, [rear]                  ; check if reached end of queue
+   je .empty                        ; return if empty
+   mov edi, dword [ecx + ebx * 4]   ; fetch the 1st element
 .shift:
-   inc ebx
-   mov edx, dword [ecx + ebx * 4] ; load the next element into edx
-   cmp edx, 0 ; overflow
-   je .return
-   mov dword [ecx + (ebx - 1) * 4], edx ; shift the next element into the previous position
-   cmp ebx, [rear]
-   jle .shift
+   inc ebx                               ; increment current pointer (next pointer)
+   mov edx, dword [ecx + ebx * 4]        ; save next pointer into register
+   cmp edx, 0                            ; check if reached end
+   je .return                            ; return if reached end
+   mov dword [ecx + (ebx - 1) * 4], edx  ; shift the next element into the previous position
+   cmp ebx, [rear]                       ; check if reached end of queue
+   jle .shift                            ; repeat and keep shifting until end
 .return:
-   mov dword [ecx + (ebx - 1) * 4], 0 ; empty the last index
-   dec dword [rear]
-   call _unlock_mutex
+   mov dword [ecx + (ebx - 1) * 4], 0    ; empty the last index after shifting
+   dec dword [rear]                      ; decrement rear pointer (reduced size)
+   call _unlock_mutex                    ; unlock mutex
    ret
 .empty:
-   mov edi, 0
-   call _unlock_mutex
+   mov edi, 0                            ; save into register the value 0 (none)
+   call _unlock_mutex                    ; unlock mutex
    ret
 
+; ===============================
+; ======== _lock_mutex ==========
+; ===============================
 _lock_mutex:
    mov eax, 0
-   ;lock cmpxchg [mutex], eax
    xchg eax, [mutex]   ; atomically exchange mutex value with 0
    test eax, eax       ; test if mutex was previously unlocked
    jnz .done           ; if mutex was previously unlocked, we have successfully locked it
-   pause               ; otherwise, spin and retry
-   jmp _lock_mutex
+   pause               ; otherwise, spin and retry (reduce CPU usage)
+   jmp _lock_mutex     ; keep trying to lock
 .done:
    ret
 
+; =================================
+; ======== _unlock_mutex ==========
+; =================================
 _unlock_mutex:
-   mov dword [mutex], 1
+   mov dword [mutex], 1  ; restore original value into mutex
    ret
 
+; =================================
+; ======== _wait_condvar ==========
+; =================================
+; Waits on a condition variable. 
+; Uses futex syscall for underlying synchronization and thread scheduling.
 _wait_condvar:
-   mov ebx, condvar
-   cmp dword [ebx], 1
-   je .done
-   mov ecx, FUTEX_WAIT | FUTEX_PRIVATE_FLAG
-   mov edx, 0
-   xor esi, esi
-   xor edi, edi
+   mov ebx, condvar           ; 1st arg: the address of variable
+   cmp dword [ebx], 1         ; check the value has changed
+   je .done                   ; terminates if successfully acquired lock
+   mov ecx, FUTEX_WAIT | FUTEX_PRIVATE_FLAG ; 2nd arg: futex op
+   mov edx, 0		      ; 3rd arg: the target value
+   xor esi, esi               ; 4th arg: empty
+   xor edi, edi               ; 5th arg: empty
    mov eax, SYS_futex
    int 0x80
    test eax, eax
@@ -292,9 +315,15 @@ _wait_condvar:
 .done:
    ret
 
+; ================================
+; ======== _emit_signal ==========
+; ================================
+; Awake threads that are waiting on condition variable.
+; Uses futex syscall for underlying synchronization and thread scheduling.
 _emit_signal:
+   ; 1st: uaddr* | 2nd: futex_op | 3rd: target_val | 4th: empty | 5th: empty
    mov ebx, condvar
-   mov ecx, FUTEX_WAKE | FUTEX_PRIVATE_FLAG
+   mov ecx, FUTEX_WAKE | FUTEX_PRIVATE_FLAG  ; the difference is in the FUTEX_WAKE flag
    mov edx, 0
    xor esi, esi
    xor edi, edi
