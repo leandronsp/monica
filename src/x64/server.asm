@@ -6,17 +6,17 @@
 global _start
 
 ; Syscalls constants
-%define SYS_futex 240      ; futex
-%define SYS_mmap2 192      ; allocate memory into heap
-%define SYS_clone 120      ; create thread
-%define SYS_socket 359     ; open socket
-%define SYS_bind 361       ; bind to open socket
-%define SYS_listen 363     ; listen to the socket
-%define SYS_accept4 364    ; accept connections to the socket
-%define SYS_write 4        ; write
-%define SYS_close 6        ; close
-%define SYS_exit 1         ; exit
-%define SYS_exit_group 252 ; exit
+%define SYS_futex 202      ; futex
+%define SYS_mmap 9        ; allocate memory into heap
+%define SYS_clone 56       ; create thread
+%define SYS_socket 41      ; open socket
+%define SYS_bind 49        ; bind to open socket
+%define SYS_listen 50      ; listen to the socket
+%define SYS_accept4 288    ; accept connections to the socket
+%define SYS_write 1        ; write
+%define SYS_close 3        ; close
+%define SYS_exit 60        ; exit
+%define SYS_exit_group 231 ; exit
 
 ; Misc constants
 %define STDOUT 1
@@ -54,14 +54,14 @@ global _start
 %define FUTEX_PRIVATE_FLAG 128
 
 section .data
-queue: dd QUEUE_SIZE dup(0) ; initialize array with zero's
-front: dd 0		    ; the front pointer for connection queue
-rear: dd 0		    ; the rear pointer (size) for connection queue
-mutex: dd 1                 ; a shared variable to synchronize threads in spinlock
-condvar: dd 0               ; a shared variable to synchronize threads in futex
+queue: dq QUEUE_SIZE dup(0) ; initialize array with zero's
+front: dq 0		    ; the front pointer for connection queue
+rear: dq 0		    ; the rear pointer (size) for connection queue
+mutex: dq 1                 ; a shared variable to synchronize threads in spinlock
+condvar: dq 0               ; a shared variable to synchronize threads in futex
 
 section .bss
-sockfd: resd 1 ; the socket file descriptor
+sockfd: resq 1 ; the socket file descriptor
 
 section .text
 listenMsg: db "Listening to the port 3000", 0xA, 0
@@ -70,25 +70,25 @@ listenMsgLen: equ $- listenMsg
 ; ======== _start ==========
 ; ==========================
 _start:	            
-   mov edi, 0           ; thread pool counter
+   mov r8, 0           ; thread pool counter
 .pool:
-   mov ebx, _thandle    ; save the function pointer to be used in the thread
+   mov rdi, _thandle    ; save the function pointer to be used in the thread
    call _pthread        ; create a new thread
-   inc edi
-   cmp edi, 5           ; pool size
+   inc r8
+   cmp r8, 5           ; pool size
    je .socket
    jmp .pool
 .socket:
    ; open a new socket
    ; socket(int family, int type, int proto)
-   mov ebx, AF_INET
-   mov ecx, SOCK_STREAM
-   mov edx, SOCK_PROTOCOL
-   mov eax, SYS_socket
-   int 0x80
-   test eax, eax
+   mov rdi, AF_INET
+   mov rsi, SOCK_STREAM
+   mov rdx, SOCK_PROTOCOL
+   mov rax, SYS_socket
+   syscall
+   test rax, rax
    js _error
-   mov [sockfd], eax ; save the fd into memory
+   mov [sockfd], rax ; save the fd into memory
 .bind:
    ; define the struct by pushing 16 bytes onto the stack
    ; family, port, ip_addr, sin_zero
@@ -99,40 +99,40 @@ _start:
 
    ; bind socket to an IP address and Port
    ; bind(int fd, struct *str, int strlen)
-   mov ebx, [sockfd] 
-   mov edx, 16
-   mov ecx, esp       ; esp is the stack pointer, top AF_INET
-   mov eax, SYS_bind
-   int 0x80
+   mov rdi, [sockfd] 
+   mov rsi, rsp       ; rsp is the stack pointer, top AF_INET
+   mov rdx, 16
+   mov rax, SYS_bind
+   syscall
 
-   add esp, 12        ; pop 12 bytes from the stack
-   test eax, eax
+   add rsp, 12        ; pop 12 bytes from the stack
+   test rax, rax
    js _error
 .listen:
    ; make socket to listen on the bound address
    ; listen(int fd, int backlog)
-   mov ebx, [sockfd]
-   mov ecx, BACKLOG
-   mov eax, SYS_listen
-   int 0x80
-   test eax, eax
+   mov rdi, [sockfd]
+   mov rsi, BACKLOG
+   mov rax, SYS_listen
+   syscall
+   test rax, rax
    js _error
 
    ; print "Listening on the port 3000" in STDOUT
-   mov esi, listenMsg
-   mov edi, listenMsgLen
+   mov r10, listenMsg
+   mov r8, listenMsgLen
    call _print
 .accept:
    ; block until a new connection is established
    ; accept4(int fd, struct*, int, int)
-   mov ebx, [sockfd]
-   mov ecx, 0x0          
-   mov edx, 0x0
-   mov esi, 0x0
-   mov eax, SYS_accept4
-   int 0x80
+   mov rdi, [sockfd]
+   mov rsi, 0x0          
+   mov rdx, 0x0
+   mov r10, 0x0
+   mov rax, SYS_accept4
+   syscall
 
-   mov edi, eax   ; save the client socket (eax) in the register (edi)
+   mov r8, rax   ; save the client socket (rax) in the register (r8)
    call _enqueue  ; enqueue the register
    jmp .accept    ; repeat in loop
 
@@ -144,15 +144,15 @@ _thandle:
    mov eax, [rear]    ; check queue size
    cmp eax, 0         ; compare
    je .wait           ; wait while queue is empty
-   call _dequeue      ; dequeue a connection (element is stored in edi)
+   call _dequeue      ; dequeue a connection (element is stored in r8)
    jmp .handle_task   ; handle the task
 .wait:
    call _wait_condvar ; wait on futex controlled by an integer (condvar)
    jmp _thandle       ; repeat in loop
 .handle_task:
-   push edi           ; push edi (connection) onto the stack
+   push r8           ; push r8 (connection) onto the stack
    call _handle       ; call the handle function
-   pop ebp            ; pop connection from the stack
+   pop rbp            ; pop connection from the stack
    jmp _thandle       ; repeat in loop
 
 response: db `HTTP/1.1 200 OK\r\nContent-Length: 22\r\n\r\n<h1>Hello, World!</h1>`, 0
@@ -161,70 +161,70 @@ responseLen: equ $- response
 ; ======== _handle ==========
 ; ===========================
 _handle:
-   push ebp               ; create a stack frame
-   mov ebp, esp           ; preserve base pointer
-   mov ebx, [ebp + 8]     ; 1st argument in the stack (connection)
-   pop ebp                ; drop stack frame
+   push rbp               ; create a stack frame
+   mov rbp, rsp           ; preserve base pointer
+   mov rdi, [rbp + 16]     ; 1st argument in the stack (connection)
+   pop rbp                ; drop stack frame
 
    ; write response into the connection socket
-   mov ecx, response
-   mov edx, responseLen
-   mov eax, SYS_write
-   int 0x80
+   mov rsi, response
+   mov rdx, responseLen
+   mov rax, SYS_write
+   syscall
 
    ; close the client socket
-   mov eax, SYS_close
-   int 0x80
+   mov rax, SYS_close
+   syscall
    ret
 
 _print:
-   mov ebx, STDOUT
-   mov ecx, esi
-   mov edx, edi
-   mov eax, SYS_write
-   int 0x80
+   mov rdi, STDOUT
+   mov rsi, r10
+   mov rdx, r8
+   mov rax, SYS_write
+   syscall
    ret
 
 error: db "An error occurred", 0
 errorLen: equ $- error
 _error:
-   mov ebx, STDOUT
-   mov ecx, error
-   mov edx, errorLen
-   mov eax, SYS_write
-   int 0x80
+   mov rdi, STDOUT
+   mov rsi, error
+   mov rdx, errorLen
+   mov rax, SYS_write
+   syscall
 
    ; Terminates all threads
-   mov ebx, 1
-   mov eax, SYS_exit_group
-   int 0x80
+   mov rdi, 1
+   mov rax, SYS_exit_group
+   syscall
 
 ; ============================
 ; ======== _pthread ==========
 ; ============================
 ; Creates a POSIX thread using a local stack
 _pthread:
-   ; ebx contains the function pointer (_thandle)
+   ; rdi contains the function pointer (_thandle)
    ; push the function pointer onto the stack
-   push ebx
+   push rdi
 
    ; memory allocation (stack-like)
    ; after syscall, 4MB will be allocated in the memory
-   ; mmap2(addr*, int len, int prot, int flags)
-   mov ebx, 0x0
-   mov ecx, STACK_SIZE
-   mov edx, PROT_WRITE | PROT_READ
-   mov esi, MAP_ANONYMOUS | MAP_PRIVATE | MAP_GROWSDOWN
-   mov eax, SYS_mmap2
-   int 0x80
+   ; mmap(addr*, int len, int prot, int flags)
+   mov rdi, 0x0
+   mov rsi, STACK_SIZE
+   mov rdx, PROT_WRITE | PROT_READ
+   mov r10, MAP_ANONYMOUS | MAP_PRIVATE | MAP_GROWSDOWN
+   mov rax, SYS_mmap
+   syscall
 
    ; thread creation
    ; clone(int flags, thread_stack*)
-   mov ebx, THREAD_FLAGS
-   lea ecx, [eax + STACK_SIZE - 8]     ; stack pointer for the thread
-   pop dword [ecx]                     ; pop function pointer into ecx (stack pointer)
-   mov eax, SYS_clone
-   int 0x80
+   mov rdi, THREAD_FLAGS
+   lea rsi, [rax + STACK_SIZE - 8]     ; stack pointer for the thread
+   pop qword [rsi]
+   mov rax, SYS_clone
+   syscall
    ret
 
 ; ============================
@@ -232,11 +232,11 @@ _pthread:
 ; ============================
 ; Enqueue connections into the queue
 _enqueue:
-   ; edi register contains the connection to be enqueued
+   ; r8 register contains the connection to be enqueued
 
    call _lock_mutex                  ; spinlock in mutex
-   mov ebx, [rear]                   ; preserve rear pointer
-   mov dword [queue + ebx * 4], edi  ; enqueue the connection
+   mov rdi, [rear]                   ; preserve rear pointer
+   mov qword [queue + rdi * 8], r8  ; enqueue the connection
    inc dword [rear]                  ; increment the rear pointer (size)
    call _emit_signal                 ; futex wake the any suspended thread
    call _unlock_mutex                ; unlock mutex
@@ -248,29 +248,29 @@ _enqueue:
 ; Dequeue connections from the queue
 _dequeue:
    call _lock_mutex                 ; spinlock in mutex
-   xor ebx, ebx                     ; clear register
-   xor edi, edi                     ; clear register
-   xor edx, edx                     ; clear register
-   lea ecx, [queue]                 ; load queue address into ecx
-   mov ebx, [front]                 ; current pointer
-   cmp ebx, [rear]                  ; check if reached end of queue
+   xor rdi, rdi                     ; clear register
+   xor r8, r8                     ; clear register
+   xor rdx, rdx                     ; clear register
+   lea rsi, [queue]                 ; load queue address into rsi
+   mov rdi, [front]                 ; current pointer
+   cmp rdi, [rear]                  ; check if reached end of queue
    je .empty                        ; return if empty
-   mov edi, dword [ecx + ebx * 4]   ; fetch the 1st element
+   mov r8, qword [rsi + rdi * 8]   ; fetch the 1st element
 .shift:
-   inc ebx                               ; increment current pointer (next pointer)
-   mov edx, dword [ecx + ebx * 4]        ; save next pointer into register
-   cmp edx, 0                            ; check if reached end
+   inc rdi                               ; increment current pointer (next pointer)
+   mov rdx, qword [rsi + rdi * 8]        ; save next pointer into register
+   cmp rdx, 0                            ; check if reached end
    je .return                            ; return if reached end
-   mov dword [ecx + (ebx - 1) * 4], edx  ; shift the next element into the previous position
-   cmp ebx, [rear]                       ; check if reached end of queue
+   mov qword [rsi + (rdi - 1) * 8], rdx  ; shift the next element into the previous position
+   cmp rdi, [rear]                       ; check if reached end of queue
    jle .shift                            ; repeat and keep shifting until end
 .return:
-   mov dword [ecx + (ebx - 1) * 4], 0    ; empty the last index after shifting
+   mov qword [rsi + (rdi - 1) * 8], 0    ; empty the last index after shifting
    dec dword [rear]                      ; decrement rear pointer (reduced size)
    call _unlock_mutex                    ; unlock mutex
    ret
 .empty:
-   mov edi, 0                            ; save into register the value 0 (none)
+   mov r8, 0                            ; save into register the value 0 (none)
    call _unlock_mutex                    ; unlock mutex
    ret
 
@@ -278,9 +278,9 @@ _dequeue:
 ; ======== _lock_mutex ==========
 ; ===============================
 _lock_mutex:
-   mov eax, 0
-   xchg eax, [mutex]   ; atomically exchange mutex value with 0
-   test eax, eax       ; test if mutex was previously unlocked
+   mov rax, 0
+   xchg rax, [mutex]   ; atomically exchange mutex value with 0
+   test rax, rax       ; test if mutex was previously unlocked
    jnz .done           ; if mutex was previously unlocked, we have successfully locked it
    pause               ; otherwise, spin and retry (reduce CPU usage)
    jmp _lock_mutex     ; keep trying to lock
@@ -300,14 +300,14 @@ _unlock_mutex:
 ; Waits on a condition variable. 
 ; Uses futex syscall for underlying synchronization and thread scheduling.
 _wait_condvar:
-   mov ebx, condvar           ; 1st arg: the address of variable
-   mov ecx, FUTEX_WAIT | FUTEX_PRIVATE_FLAG ; 2nd arg: futex op
-   mov edx, 0		      ; 3rd arg: the target value
-   xor esi, esi               ; 4th arg: empty
-   xor edi, edi               ; 5th arg: empty
-   mov eax, SYS_futex
-   int 0x80
-   test eax, eax
+   mov rdi, condvar           ; 1st arg: the address of variable
+   mov rsi, FUTEX_WAIT | FUTEX_PRIVATE_FLAG ; 2nd arg: futex op
+   mov rdx, 0		      ; 3rd arg: the target value
+   xor r10, r10               ; 4th arg: empty
+   xor r8, r8               ; 5th arg: empty
+   mov rax, SYS_futex
+   syscall
+   test rax, rax
    jz .done
    jmp _error
 .done:
@@ -320,11 +320,11 @@ _wait_condvar:
 ; Uses futex syscall for underlying synchronization and thread scheduling.
 _emit_signal:
    ; 1st: uaddr* | 2nd: futex_op | 3rd: target_val | 4th: empty | 5th: empty
-   mov ebx, condvar
-   mov ecx, FUTEX_WAKE | FUTEX_PRIVATE_FLAG  ; the difference is in the FUTEX_WAKE flag
-   mov edx, 0
-   xor esi, esi
-   xor edi, edi
-   mov eax, SYS_futex
-   int 0x80
+   mov rdi, condvar
+   mov rsi, FUTEX_WAKE | FUTEX_PRIVATE_FLAG  ; the difference is in the FUTEX_WAKE flag
+   mov rdx, 0
+   xor r10, r10
+   xor r8, r8
+   mov rax, SYS_futex
+   syscall
    ret

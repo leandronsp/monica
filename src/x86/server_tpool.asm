@@ -301,8 +301,6 @@ _unlock_mutex:
 ; Uses futex syscall for underlying synchronization and thread scheduling.
 _wait_condvar:
    mov ebx, condvar           ; 1st arg: the address of variable
-   cmp dword [ebx], 1         ; check the value has changed
-   je .done                   ; terminates if successfully acquired lock
    mov ecx, FUTEX_WAIT | FUTEX_PRIVATE_FLAG ; 2nd arg: futex op
    mov edx, 0		      ; 3rd arg: the target value
    xor esi, esi               ; 4th arg: empty
