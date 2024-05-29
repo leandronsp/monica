@@ -1,6 +1,27 @@
 # monica
 
-Playing with Assemblers, mostly NASM. See Makefile.
+Playing with Assembly x86_64.
+
+## Requirements
+
+* x86_64
+* GNU/Linux
+* NASM 2.16.01
+* ld 2.38
+* GNU debugger (gdb) 12.1 
+* strace 5.16
+
+## Running
+
+```bash
+$ ./build.sh hello
+$ ./target/hello
+
+# or simply
+
+$ ./run.sh hello
+0
+```
 
 ## Why this name
 
