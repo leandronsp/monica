@@ -67,8 +67,6 @@ _start:
 	call .close
 	jmp .accept
 .write:
-	mov r8, rax
-
 	; int write(fd)
 	mov rdi, r8
 	mov rsi, response
