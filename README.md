@@ -23,6 +23,15 @@ $ ./run.sh hello
 0
 ```
 
+## Debugging
+
+```bash
+$ ./gdb.sh hello
+
+Reading symbols from target/hello...
+(gdb)
+```
+
 ## Why this name
 
 "Monica" is a bad try on pun with the word "mnemonics".
