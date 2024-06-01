@@ -3,10 +3,11 @@ global _start
 %define SYS_exit 60
 %define EXIT_SUCCESS 0
 %define EXIT_ERROR 1
-%define STDOUT 1
+
+%define ARRAY_CAPACITY 10
 
 section .bss
-array: resb 10
+array: resb ARRAY_CAPACITY
 
 section .data
 pointer: db 0
@@ -16,25 +17,37 @@ _start:
 	; array << 42
 	mov rdi, 42
 	call .append
-
-	; array << 101
-	mov rdi, 101
-	call .append
-
 	; array[0] == 42
 	mov rdi, 0
 	call .get
 	cmp rax, 42
 	jne .error
 
+
+	; array << 101
+	mov rdi, 101
+	call .append
 	; array[1] == 101
 	mov rdi, 1
 	call .get
 	cmp rax, 101
 	jne .error
 
-	; array[2] == 0 (null)
+	; array << 255
+	mov rdi, 255
+	call .append
+	; array[2] == 255 
 	mov rdi, 2
+	call .get
+	cmp rax, 255
+	jne .error
+
+	; array << 256
+        ; it overflows and does not append to the array
+	mov rdi, 256
+	call .append
+	; array[3] == 0 (null)
+	mov rdi, 3
 	call .get
 	cmp rax, 0
 	jne .error
@@ -57,6 +70,18 @@ _start:
 	cmp rax, 1
 	jne .error
 
+	; contains(array, 255) == true
+	mov rdi, 255
+	call .contains
+	cmp rax, 1
+	jne .error
+
+	; contains(array, 256) == false
+	mov rdi, 256
+	call .contains
+	cmp rax, 0
+	jne .error
+
 	mov rdi, EXIT_SUCCESS
 	jmp .exit
 
@@ -64,9 +89,12 @@ _start:
 ; ======= append ========
 ; =======================
 .append:
+        cmp rdi, 255                 ; check if value in rdi is greater than 255 (1-byte unsigned integer)
+        jg .done                     ; jump right to `done` if overflow
 	mov sil, [pointer]           ; move pointer to the lower bytes of rsi (sil)
 	mov [array + rsi * 1], rdi   ; add rdi (element) to array
 	inc byte [pointer]           ; update the pointer, step one byte
+.done:
 	ret
 
 ; ====================
@@ -81,7 +109,7 @@ _start:
 ; =========================
 .contains:
 	xor rax, rax                 ; reset rax, return false (0) by default
-	mov sil, 0                   ; start loop counter at the lower rsi (sil)
+	mov rsi, 0                   ; start loop counter at the lower rsi (sil)
 .loop:
 	cmp sil, [pointer]           ; check if loop counter reached the array pointer
 	je .done                     ; break loop if checked all the elements
