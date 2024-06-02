@@ -1,88 +1,71 @@
 global _start
 
-%define SYS_brk 12
 %define SYS_exit 60
-
 %define EXIT_SUCCESS 0
 %define EXIT_ERROR 1
+%define OFFSET_CAPACITY 3
 %define MAX_UINT 255
-%define ARRAY_CAPACITY 10
-%define BYTE_STEP 1
+
+; 1 byte
+; Unsigned integer
+; Max 255
+
+; [1, 2, 3, 0, 0xFF, 0x4D]
 
 section .bss
-array: resb ARRAY_CAPACITY + 1
+array: resb OFFSET_CAPACITY + 1
 
 section .data
 pointer: db 0
 
 section .text
 _start:
-.populate:
-        mov byte [pointer], 0
-        mov r8, 0
-.loop:
-        cmp r8, 10
-        je .done_loop
-        inc r8
-
-        ; append
-	mov rdi, r8
+	mov rdi, 1
 	call .append
 
-        ; get
-        mov rdi, r8
-	sub rdi, 1
-	cmp [array + rdi * BYTE_STEP], r8b
-	jne .error
-
-        jmp .loop
-.done_loop:
-        ; trying to append one more element but the array is already full
-	mov rdi, 11
+	; does not append, because 256 overflows 1-byte unsigned integer
+	mov rdi, 256
 	call .append
 
-	; array[11] == 0 (null)
-	cmp byte [array + rdi * BYTE_STEP], 0
-	jne .error
-.overflow:
-        mov byte [pointer], 0   ; reset pointer
+	mov rdi, 2
+	call .append
 
-	; add a valid unsigned 1-byte integer
 	mov rdi, 255
 	call .append
 
-	; add an invalid unsigned 1-byte integer (overflow)
-	mov rdi, 256
+	mov rdi, 99
 	call .append
-	; it does not change the current value because it overflows
-	; array[0] == 255
-	cmp byte [array + 0 * BYTE_STEP], 255
+.check:
+	mov al, [array]
+	cmp al, 1
+	jne .error
+	mov al, [array + 1]
+	cmp al, 2
+	jne .error
+	mov al, [array + 2]
+	cmp al, 255
+	jne .error
+	mov al, [array + 3]
+	cmp al, 0
 	jne .error
 
 	mov rdi, EXIT_SUCCESS
-        jmp .exit
+	jmp .exit
 .error:
 	mov rdi, EXIT_ERROR
 .exit:
 	mov rax, SYS_exit
 	syscall
-
-; =======================
-; ======= append ========
-; =======================
 .append:
-        cmp byte [pointer], ARRAY_CAPACITY  ; check if array is full
-        je .done_append                     
+	cmp byte [pointer], OFFSET_CAPACITY   ; check if array is full
+	je .done
 
-        cmp rdi, MAX_UINT                   ; check if value in rdi is greater than 255 (1-byte unsigned integer)
-        jg .done_append                     
+	cmp rdi, MAX_UINT                ; check if element overflows 1-byte unsigned integer
+	jg .done
 
-	mov sil, [pointer]                  ; move pointer to the lower bytes of rsi (sil)
-	mov [array + rsi * 1], rdi          ; add rdi (element) to array
-
-        cmp byte [pointer], ARRAY_CAPACITY  ; check if array is full
-        je .done_append
-
-	inc byte [pointer]                  ; update the pointer, step one byte
-.done_append:
+	; append element (rdi) to the array and increment the pointer
+	mov r8b, [pointer]	
+	mov [array + r8], rdi	
+	inc byte [pointer]
+.done:
 	ret
