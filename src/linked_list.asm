@@ -5,11 +5,13 @@ global _start
 
 %define EXIT_SUCCESS 0
 %define EXIT_ERROR 1
+
+; 1 byte for value, 8 bytes for next address, 1 fixed-byte (0xFF)
 %define NODE_SIZE 10
 
 section .bss
-head: resb NODE_SIZE      ; 1 byte for value, 8 bytes for next address, 1 fixed-byte (0xFF)
-result: resb 8            ; the result (array) for the traverse subroutine
+head: resb 8     ; the pointer to the linked list on heap
+result: resb 8   ; the result (array) for the traverse subroutine
 
 section .data
 
