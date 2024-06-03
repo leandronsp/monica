@@ -72,23 +72,18 @@ _start:
 
 .traverse:
 	mov rbx, [head]
-	mov rdi, 0
 	mov rsi, 0
 .loop_traverse:
 	; get the value of the node
-	mov r8, [rbx + rdi]
+	mov r8b, [rbx]
 	mov byte [result + rsi], r8b
 
 	; get the address of the next node
-	lea r8, [rbx + rdi + 1]
+	mov rbx, [rbx + 1]
 
-	; follow the next node
-	mov r8, [r8]
-
-	cmp r8, 0
+	cmp rbx, 0
 	je .done_traverse
 
-	add rdi, NODE_SIZE
 	add rsi, 1
 	jmp .loop_traverse
 .done_traverse:
