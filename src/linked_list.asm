@@ -5,10 +5,11 @@ global _start
 
 %define EXIT_SUCCESS 0
 %define EXIT_ERROR 1
+%define NODE_SIZE 10
 
 section .bss
-head: resb 10     ; 1 byte for value, 8 bytes for next address, 1 fixed-byte (0xFF)
-result: resb 8    ; the result (array) for the traverse subroutine
+head: resb NODE_SIZE      ; 1 byte for value, 8 bytes for next address, 1 fixed-byte (0xFF)
+result: resb 8            ; the result (array) for the traverse subroutine
 
 section .data
 
@@ -57,13 +58,13 @@ _start:
 ; RDX: the allocated node
 .insert:
 	call .allocate_node
-	mov byte [rdx + 0], r8b     ; add element
-	mov byte [rdx + 9], 0xFF    ; add padding (10h byte)
+	mov byte [rdx + 0], r8b               ; add element
+	mov byte [rdx + NODE_SIZE - 1], 0xFF  ; add padding (10h byte)
 
 	test r9, r9
-	jz .done_insert             ; no previous node provided
+	jz .done_insert                       ; no previous node provided
 
-	mov [r9 + 1], rdx           ; previous.next = current
+	mov [r9 + 1], rdx                     ; previous.next = current
 .done_insert:
 	ret
 
@@ -85,7 +86,7 @@ _start:
 	cmp r8, 0
 	je .done_traverse
 
-	add rdi, 10
+	add rdi, NODE_SIZE
 	add rsi, 1
 	jmp .loop_traverse
 .done_traverse:
@@ -96,13 +97,13 @@ _start:
 	mov rdx, rax
 
 	mov rdi, rax
-	add rdi, 10
+	add rdi, NODE_SIZE
 	mov rax, SYS_brk
 	syscall
 	ret
 
 .current_brk:
-	mov rdi, 0
+	xor rdi, rdi
 	mov rax, SYS_brk
 	syscall
 	ret
