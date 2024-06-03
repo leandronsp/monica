@@ -5,7 +5,6 @@ global _start
 %define EXIT_SUCCESS 0
 %define EXIT_ERROR 1
 %define OFFSET_CAPACITY 3
-%define MAX_UINT 255
 
 ; 1 byte
 ; Unsigned integer
@@ -70,12 +69,6 @@ _start:
 	mov rax, SYS_exit
 	syscall
 .enqueue:
-	cmp byte [pointer], OFFSET_CAPACITY   ; check if queue is full
-	je .done
-
-	cmp rdi, MAX_UINT                ; check if element overflows 1-byte unsigned integer
-	jg .done
-
 	; append element (rdi) to the queue and increment the pointer
 	xor r8, r8
 	mov r8b, [pointer]	

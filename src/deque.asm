@@ -5,7 +5,6 @@ global _start
 %define EXIT_SUCCESS 0
 %define EXIT_ERROR 1
 %define OFFSET_CAPACITY 5
-%define MAX_UINT 255
 
 ; 1 byte
 ; Unsigned integer
