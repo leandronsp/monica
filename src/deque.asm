@@ -26,18 +26,91 @@ _start:
 	mov rdi, 2
 	call .rpush
 
-	; [2]
+	; [1, 2, 3]
+	mov rdi, 3
+	call .rpush
+
+	; [2, 3]
 	call .lpop
 	cmp rax, 1
 	jne .error
 
-	; [42, 2]
+	; [3]
+	call .lpop
+	cmp rax, 2
+	jne .error
+
+	; []
+	call .lpop
+	cmp rax, 3
+	jne .error
+
+	; []
+	call .rpop
+	cmp rax, 0
+	jne .error
+
+	; []
+	call .lpop
+	cmp rax, 0
+	jne .error
+
+	; [42]
 	mov rdi, 42
 	call .lpush
 
-	; [2]
+	; [33, 42]
+	mov rdi, 33
+	call .lpush
+
+	; [22, 33, 42]
+	mov rdi, 22
+	call .lpush
+
+	; [22, 33]
 	call .rpop
-	cmp rax, 2
+	cmp rax, 42
+	jne .error
+
+	; [33]
+	call .lpop
+	cmp rax, 22
+	jne .error
+
+	; [33, 99]
+	mov rdi, 99
+	call .rpush
+
+	; [100, 33, 99]
+	mov rdi, 100
+	call .lpush
+
+	; [42, 100, 33, 99]
+	mov rdi, 42
+	call .lpush
+
+	; [42, 100, 33, 99, 22]
+	mov rdi, 22
+	call .rpush
+
+	; [100, 33, 99, 22]
+	call .lpop
+	cmp rax, 42
+	jne .error
+
+	; [33, 99, 22]
+	call .lpop
+	cmp rax, 100
+	jne .error
+
+	; [33, 99]
+	call .rpop
+	cmp rax, 22
+	jne .error
+
+	; [33]
+	call .rpop
+	cmp rax, 99
 	jne .error
 
 	mov rdi, EXIT_SUCCESS
@@ -50,25 +123,20 @@ _start:
 
 ; O(1)
 .rpush:
-	; append element (rdi) to the queue and increment the pointer
-	xor r8, r8
 	mov r8b, [pointer]	
 	mov [queue + r8], rdi	
 	inc byte [pointer]
-.done:
 	ret
 
 ; O(1)
 .rpop:
-	xor rax, rax
-	xor r10, r10
-	mov r10b, [pointer]
-	mov al, [queue + r10 - 1]
-	mov byte [queue + r10 - 1], 0
+	mov r8b, [pointer]
+	mov al, [queue + r8 - 1]
+	mov byte [queue + r8], 0
 
 	cmp byte [pointer], 0
 	je .done_rpop
-
+	
 	dec byte [pointer]
 .done_rpop:
 	ret
@@ -76,39 +144,44 @@ _start:
 ; O(n)
 .lpop:
 	xor rax, rax
-	mov al, [queue]
-	mov rsi, 0
-.loop_lpop:
-	cmp sil, [pointer]
-	je .done_lpop
+	xor rsi, rsi
 
+	mov al, [queue]
+	mov rcx, 0
+.loop_lpop:
 	cmp byte [pointer], 0
+	je .return_lpop
+
+	cmp cl, [pointer]
 	je .done_lpop
 
 	; shift
 	xor r10, r10
-	mov r10, [queue + rsi + 1]
-	mov [queue + rsi], r10
+	mov r10b, [queue + rcx + 1]
+	mov byte [queue + rcx], r10b
 
-	inc rsi
-	dec byte [pointer]
+	inc rcx
 	jmp .loop_lpop
 .done_lpop:
+	dec byte [pointer]
+.return_lpop:
 	ret
 
 ; O(n)
 .lpush:
-	mov rsi, 0
+	xor rcx, rcx
+	mov cl, [pointer]
 .loop_lpush:
-	cmp sil, [pointer]
+	cmp cl, 0
 	je .done_lpush
+
+	dec rcx
 
 	; shift
 	xor r10, r10
-	mov r10, [queue + rsi]
-	mov [queue + rsi + 1], r10
+	mov r10b, [queue + rcx]
+	mov byte [queue + rcx + 1], r10b
 
-	inc rsi
 	jmp .loop_lpush
 .done_lpush:
 	mov byte [queue], dil	
