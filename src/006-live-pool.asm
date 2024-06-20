@@ -12,7 +12,6 @@ global _start
 %define SYS_brk 12
 %define SYS_exit 60
 %define SYS_futex 202
-%define SYS_mmap 9
 
 %define AF_INET 2
 %define SOCK_STREAM 1
@@ -35,12 +34,6 @@ global _start
 %define FUTEX_WAIT 0
 %define FUTEX_WAKE 1
 %define FUTEX_PRIVATE_FLAG 128
-
-%define PROT_READ 0x1
-%define PROT_WRITE 0x2
-%define MAP_GROWSDOWN 0x100
-%define MAP_ANONYMOUS 0x0020     
-%define MAP_PRIVATE 0x0002      
 
 section .data
 sockaddr:
@@ -221,15 +214,18 @@ wait_condvar:
    ret
 
 thread:
-	mov rdi, 0x0
-	mov rsi, CHILD_STACK_SIZE
-	mov rdx, PROT_WRITE | PROT_READ
-	mov r10, MAP_ANONYMOUS | MAP_PRIVATE | MAP_GROWSDOWN
-	mov rax, SYS_mmap
+	mov rdi, 0
+	mov rax, SYS_brk
+	syscall
+	mov rdx, rax
+
+	mov rdi, rax
+	add rdi, CHILD_STACK_SIZE
+	mov rax, SYS_brk
 	syscall
 
 	mov rdi, CLONE_VM|CLONE_FS|CLONE_FILES|CLONE_SIGHAND|CLONE_PARENT|CLONE_THREAD|CLONE_IO
-	lea rsi, [rax + CHILD_STACK_SIZE - 8]
+	lea rsi, [rdx + CHILD_STACK_SIZE - 8]
 	mov qword [rsi], handle
 	mov rax, SYS_clone
 	syscall

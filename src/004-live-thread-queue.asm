@@ -11,8 +11,6 @@ global _start
 %define SYS_clone 56
 %define SYS_brk 12
 %define SYS_exit 60
-%define SYS_futex 202
-%define SYS_mmap 9
 
 %define AF_INET 2
 %define SOCK_STREAM 1
@@ -32,16 +30,6 @@ global _start
 
 %define QUEUE_OFFSET_CAPACITY 5
 
-%define FUTEX_WAIT 0
-%define FUTEX_WAKE 1
-%define FUTEX_PRIVATE_FLAG 128
-
-%define PROT_READ 0x1
-%define PROT_WRITE 0x2
-%define MAP_GROWSDOWN 0x100
-%define MAP_ANONYMOUS 0x0020     
-%define MAP_PRIVATE 0x0002      
-
 section .data
 sockaddr:
 	sa_family: dw AF_INET   ; 2 bytes
@@ -60,8 +48,6 @@ timespec:
 	tv_nsec: dq 0
 queuePtr: db 0
 queueSize: db QUEUE_OFFSET_CAPACITY
-mutex: dq 1
-condvar: dq 0
 
 section .bss
 sockfd: resb 8
@@ -79,14 +65,9 @@ _start:
 	add rdi, QUEUE_OFFSET_CAPACITY
 	mov rax, SYS_brk
 	syscall
-.initialize_pool:
-	mov r8, 0
-.pool:
+
+.initialize_thread:
 	call thread        
-	inc r8
-	cmp r8, 5
-	je .socket
-	jmp .pool
 .socket:
 	; int socket(int domain, int type, int protocol)
 	mov rdi, AF_INET
@@ -123,8 +104,6 @@ _start:
 	jmp .accept
 
 enqueue:
-	call lock_mutex
-
 	mov r9, [queueSize]
 	cmp byte [queuePtr], r9b   ; check if queue is full
 	je .resize
@@ -134,8 +113,6 @@ enqueue:
 	mov [queue + rdx], r8	
 	inc byte [queuePtr]
 .done_enqueue:
-	call emit_signal
-	call unlock_mutex
 	ret
 .resize:
 	mov r10, r8   ; preserve the RDI (element to be added to array)
@@ -157,7 +134,6 @@ enqueue:
 	jmp enqueue
 
 dequeue:
-	call lock_mutex
 	xor rax, rax
 	xor rsi, rsi
 
@@ -180,87 +156,47 @@ dequeue:
 .done_dequeue:
 	dec byte [queuePtr]
 .return_dequeue:
-	call unlock_mutex
 	ret
 
-lock_mutex:
-   mov rax, 0
-   xchg rax, [mutex]   
-   test rax, rax       
-   jnz .done           
-   pause               
-   jmp lock_mutex     
-.done:
-   ret
-
-unlock_mutex:
-   mov qword [mutex], 1  
-   ret
-
-emit_signal:
-   mov rdi, condvar
-   mov rsi, FUTEX_WAKE | FUTEX_PRIVATE_FLAG  ; the difference is in the FUTEX_WAKE flag
-   xor rdx, rdx
-   xor r10, r10
-   xor r8, r8
-   mov rax, SYS_futex
-   syscall
-   ret
-
-wait_condvar:
-   mov rdi, condvar           
-   mov rsi, FUTEX_WAIT | FUTEX_PRIVATE_FLAG 
-   xor rdx, rdx
-   xor r10, r10              
-   xor r8, r8               
-   mov rax, SYS_futex
-   syscall
-   test rax, rax
-   jz .done_condvar
-.done_condvar:
-   ret
-
 thread:
-	mov rdi, 0x0
-	mov rsi, CHILD_STACK_SIZE
-	mov rdx, PROT_WRITE | PROT_READ
-	mov r10, MAP_ANONYMOUS | MAP_PRIVATE | MAP_GROWSDOWN
-	mov rax, SYS_mmap
+	mov rdi, 0
+	mov rax, SYS_brk
+	syscall
+	mov rdx, rax
+
+	mov rdi, rax
+	add rdi, CHILD_STACK_SIZE
+	mov rax, SYS_brk
 	syscall
 
 	mov rdi, CLONE_VM|CLONE_FS|CLONE_FILES|CLONE_SIGHAND|CLONE_PARENT|CLONE_THREAD|CLONE_IO
-	lea rsi, [rax + CHILD_STACK_SIZE - 8]
+	lea rsi, [rdx + CHILD_STACK_SIZE - 8]
 	mov qword [rsi], handle
 	mov rax, SYS_clone
 	syscall
 	ret
 
-handle:	
-	cmp byte [queuePtr], 0         
-	je .wait           
+handle:
+	cmp byte [queuePtr], 0
+	je handle
 
-	call dequeue      
-	mov r10, rax
-	call action       
-	jmp handle       
-.wait:
-	call wait_condvar 
-	jmp handle       
+	call dequeue
+	mov r8, rax
 
-action:
 	lea rdi, [timespec]
 	mov rax, SYS_nanosleep
 	syscall
 
 	; int write(fd)
-	mov rdi, r10
+	mov rdi, r8
 	mov rsi, response
 	mov rdx, responseLen
 	mov rax, SYS_write
 	syscall
 
 	; int close(fd)
-	mov rdi, r10
+	mov rdi, r8
 	mov rax, SYS_close
 	syscall
-	ret
+
+	jmp handle

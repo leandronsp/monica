@@ -7,6 +7,9 @@ global _start
 %define SYS_write 1
 %define SYS_close 3
 
+%define SYS_nanosleep 35
+%define SYS_fork 57
+
 %define AF_INET 2
 %define SOCK_STREAM 1
 %define SOCK_PROTOCOL 0
@@ -27,6 +30,9 @@ response:
 	crlf: db CR, LF
 	body: db "<h1>Hello, World!</h1>"
 responseLen: equ $ - response
+timespec:
+	tv_sec: dq 1
+	tv_nsec: dq 0
 
 section .bss
 sockfd: resb 1
@@ -63,18 +69,26 @@ _start:
 	mov rax, SYS_accept4
 	syscall
 	mov r8, rax
-	call .write
-	call .close
+
+	mov rax, SYS_fork
+	syscall
+
+	test rax, rax
+	jz handle
+
 	jmp .accept
-.write:
+handle:
+	lea rdi, [timespec]
+	mov rax, SYS_nanosleep
+	syscall
+
 	; int write(fd)
 	mov rdi, r8
 	mov rsi, response
 	mov rdx, responseLen
 	mov rax, SYS_write
 	syscall
-	ret
-.close:
+
 	; int close(fd)
 	mov rdi, r8
 	mov rax, SYS_close

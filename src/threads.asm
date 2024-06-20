@@ -17,16 +17,13 @@ global _start
 %define CLONE_SIGHAND 0x00000800
 
 section .data
-counter: db 0
-msg: db "Counter:  "
+msg: db "Hello"
 msgLen: equ $ - msg
 
 section .text
 _start:
-	inc byte [counter]
 	call thread
 
-.exit:
 	mov rdi, 0
 	mov rax, SYS_exit_group
 	syscall
@@ -50,10 +47,6 @@ thread:
 	ret
 
 handle:
-	mov r9b, [counter]
-	lea r8, [msg + msgLen - 1]
-	mov byte [r8], r9b
-
 	mov rdi, STDOUT
 	mov rsi, msg
 	mov rdx, msgLen

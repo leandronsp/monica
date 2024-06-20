@@ -7,12 +7,26 @@ global _start
 %define SYS_write 1
 %define SYS_close 3
 
+%define SYS_nanosleep 35
+%define SYS_clone 56
+%define SYS_brk 12
+%define SYS_exit 60
+
 %define AF_INET 2
 %define SOCK_STREAM 1
 %define SOCK_PROTOCOL 0
 %define BACKLOG 2
 %define CR 0xD
 %define LF 0xA
+
+%define CHILD_STACK_SIZE 4096
+%define CLONE_VM 0x00000100
+%define CLONE_FS 0x00000200
+%define CLONE_FILES 0x00000400
+%define CLONE_PARENT 0x00008000
+%define CLONE_THREAD 0x00010000
+%define CLONE_IO 0x80000000
+%define CLONE_SIGHAND 0x00000800
 
 section .data
 sockaddr:
@@ -27,6 +41,9 @@ response:
 	crlf: db CR, LF
 	body: db "<h1>Hello, World!</h1>"
 responseLen: equ $ - response
+timespec:
+	tv_sec: dq 1
+	tv_nsec: dq 0
 
 section .bss
 sockfd: resb 1
@@ -63,20 +80,46 @@ _start:
 	mov rax, SYS_accept4
 	syscall
 	mov r8, rax
-	call .write
-	call .close
+
+	call thread
+
 	jmp .accept
-.write:
+
+thread:
+	mov rdi, 0
+	mov rax, SYS_brk
+	syscall
+	mov rdx, rax
+
+	mov rdi, rax
+	add rdi, CHILD_STACK_SIZE
+	mov rax, SYS_brk
+	syscall
+
+	mov rdi, CLONE_VM|CLONE_FS|CLONE_FILES|CLONE_SIGHAND|CLONE_PARENT|CLONE_THREAD|CLONE_IO
+	lea rsi, [rdx + CHILD_STACK_SIZE - 8]
+	mov qword [rsi], handle
+	mov rax, SYS_clone
+	syscall
+	ret
+
+handle:
+	lea rdi, [timespec]
+	mov rax, SYS_nanosleep
+	syscall
+
 	; int write(fd)
 	mov rdi, r8
 	mov rsi, response
 	mov rdx, responseLen
 	mov rax, SYS_write
 	syscall
-	ret
-.close:
+
 	; int close(fd)
 	mov rdi, r8
 	mov rax, SYS_close
 	syscall
-	ret
+
+	mov rdi, 0
+	mov rax, SYS_exit
+	syscall
