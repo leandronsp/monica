@@ -3,7 +3,7 @@ global _start
 %define SYS_brk 12
 %define SYS_clone 56
 %define SYS_write 1        
-%define SYS_exit_group 231
+%define SYS_exit 60
 
 %define STDOUT 1
 %define CHILD_STACK_SIZE 4096
@@ -25,7 +25,7 @@ _start:
 	call thread
 
 	mov rdi, 0
-	mov rax, SYS_exit_group
+	mov rax, SYS_exit
 	syscall
 
 thread:
@@ -51,4 +51,8 @@ handle:
 	mov rsi, msg
 	mov rdx, msgLen
 	mov rax, SYS_write
+	syscall
+
+	mov rdi, 0
+	mov rax, SYS_exit
 	syscall

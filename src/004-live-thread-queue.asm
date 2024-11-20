@@ -28,8 +28,6 @@ global _start
 %define CLONE_IO 0x80000000
 %define CLONE_SIGHAND 0x00000800
 
-%define QUEUE_OFFSET_CAPACITY 5
-
 section .data
 sockaddr:
 	sa_family: dw AF_INET   ; 2 bytes
@@ -47,7 +45,6 @@ timespec:
 	tv_sec: dq 1
 	tv_nsec: dq 0
 queuePtr: db 0
-queueSize: db QUEUE_OFFSET_CAPACITY
 
 section .bss
 sockfd: resb 8
@@ -55,18 +52,6 @@ queue: resb 8
 
 section .text
 _start:
-.initialize_queue:
-	mov rdi, 0
-	mov rax, SYS_brk
-	syscall
-	mov [queue], rax
-
-	mov rdi, rax
-	add rdi, QUEUE_OFFSET_CAPACITY
-	mov rax, SYS_brk
-	syscall
-
-.initialize_thread:
 	call thread        
 .socket:
 	; int socket(int domain, int type, int protocol)
@@ -104,34 +89,11 @@ _start:
 	jmp .accept
 
 enqueue:
-	mov r9, [queueSize]
-	cmp byte [queuePtr], r9b   ; check if queue is full
-	je .resize
-
 	xor rdx, rdx
 	mov dl, [queuePtr]	
 	mov [queue + rdx], r8	
 	inc byte [queuePtr]
-.done_enqueue:
 	ret
-.resize:
-	mov r10, r8   ; preserve the RDI (element to be added to array)
-
-	mov rdi, 0
-	mov rax, SYS_brk
-	syscall
-
-	mov rdi, rax
-	add rdi, QUEUE_OFFSET_CAPACITY
-	mov rax, SYS_brk
-	syscall
-
-	mov r9, [queueSize]
-	add r9, QUEUE_OFFSET_CAPACITY
-	mov [queueSize], r9
-
-	mov rdi, r10
-	jmp enqueue
 
 dequeue:
 	xor rax, rax

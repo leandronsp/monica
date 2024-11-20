@@ -56,7 +56,7 @@ queuePtr: db 0
 section .bss
 sockfd: resb 8
 queue: resb 8
-condvar: resb 8
+condvar: resq 1
 
 section .text
 _start:
@@ -184,7 +184,13 @@ handle:
 
 	call dequeue      
 	mov r10, rax
+	call action       
+	jmp handle       
+.wait:
+	call wait_condvar 
+	jmp handle       
 
+action:
 	lea rdi, [timespec]
 	mov rax, SYS_nanosleep
 	syscall
@@ -200,8 +206,4 @@ handle:
 	mov rdi, r10
 	mov rax, SYS_close
 	syscall
-
-	jmp handle       
-.wait:
-	call wait_condvar 
-	jmp handle       
+	ret

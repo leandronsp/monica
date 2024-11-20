@@ -4,13 +4,6 @@ global _start
 %define EXIT_SUCCESS 0
 %define EXIT_ERROR 1
 
-; 1 byte
-; Unsigned integer
-; Max 255
-
-; al => 0000 0001
-; rax => 0000 0000 0000 0000 0000 0000 0000 0001
-
 section .data
 array: db 1, 2, 3, 0
 

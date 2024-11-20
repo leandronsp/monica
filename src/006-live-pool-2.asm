@@ -52,14 +52,26 @@ timespec:
 	tv_sec: dq 1
 	tv_nsec: dq 0
 queuePtr: db 0
+queueSize: db QUEUE_OFFSET_CAPACITY
+mutex: dq 1
+condvar: dq 0
 
 section .bss
 sockfd: resb 8
 queue: resb 8
-condvar: resb 8
 
 section .text
 _start:
+.initialize_queue:
+	mov rdi, 0
+	mov rax, SYS_brk
+	syscall
+	mov [queue], rax
+
+	mov rdi, rax
+	add rdi, QUEUE_OFFSET_CAPACITY
+	mov rax, SYS_brk
+	syscall
 .initialize_pool:
 	mov r8, 0
 .pool:
@@ -104,15 +116,41 @@ _start:
 	jmp .accept
 
 enqueue:
+	call lock_mutex
+
+	mov r9, [queueSize]
+	cmp byte [queuePtr], r9b   ; check if queue is full
+	je .resize
+
 	xor rdx, rdx
 	mov dl, [queuePtr]	
 	mov [queue + rdx], r8	
 	inc byte [queuePtr]
-
+.done_enqueue:
 	call emit_signal
+	call unlock_mutex
 	ret
+.resize:
+	mov r10, r8   ; preserve the RDI (element to be added to array)
+
+	mov rdi, 0
+	mov rax, SYS_brk
+	syscall
+
+	mov rdi, rax
+	add rdi, QUEUE_OFFSET_CAPACITY
+	mov rax, SYS_brk
+	syscall
+
+	mov r9, [queueSize]
+	add r9, QUEUE_OFFSET_CAPACITY
+	mov [queueSize], r9
+
+	mov rdi, r10
+	jmp enqueue
 
 dequeue:
+	call lock_mutex
 	xor rax, rax
 	xor rsi, rsi
 
@@ -135,7 +173,22 @@ dequeue:
 .done_dequeue:
 	dec byte [queuePtr]
 .return_dequeue:
+	call unlock_mutex
 	ret
+
+lock_mutex:
+   mov rax, 0
+   xchg rax, [mutex]   
+   test rax, rax       
+   jnz .done           
+   pause               
+   jmp lock_mutex     
+.done:
+   ret
+
+unlock_mutex:
+   mov qword [mutex], 1  
+   ret
 
 emit_signal:
    mov rdi, condvar
@@ -184,7 +237,13 @@ handle:
 
 	call dequeue      
 	mov r10, rax
+	call action       
+	jmp handle       
+.wait:
+	call wait_condvar 
+	jmp handle       
 
+action:
 	lea rdi, [timespec]
 	mov rax, SYS_nanosleep
 	syscall
@@ -200,8 +259,4 @@ handle:
 	mov rdi, r10
 	mov rax, SYS_close
 	syscall
-
-	jmp handle       
-.wait:
-	call wait_condvar 
-	jmp handle       
+	ret

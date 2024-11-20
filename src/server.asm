@@ -63,18 +63,16 @@ _start:
 	mov rax, SYS_accept4
 	syscall
 	mov r8, rax
-	call .write
-	call .close
+	call handle
 	jmp .accept
-.write:
+handle:
 	; int write(fd)
 	mov rdi, r8
 	mov rsi, response
 	mov rdx, responseLen
 	mov rax, SYS_write
 	syscall
-	ret
-.close:
+
 	; int close(fd)
 	mov rdi, r8
 	mov rax, SYS_close

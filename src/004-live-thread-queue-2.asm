@@ -11,7 +11,6 @@ global _start
 %define SYS_clone 56
 %define SYS_brk 12
 %define SYS_exit 60
-%define SYS_futex 202
 
 %define AF_INET 2
 %define SOCK_STREAM 1
@@ -31,10 +30,6 @@ global _start
 
 %define QUEUE_OFFSET_CAPACITY 5
 
-%define FUTEX_WAIT 0
-%define FUTEX_WAKE 1
-%define FUTEX_PRIVATE_FLAG 128
-
 section .data
 sockaddr:
 	sa_family: dw AF_INET   ; 2 bytes
@@ -52,22 +47,27 @@ timespec:
 	tv_sec: dq 1
 	tv_nsec: dq 0
 queuePtr: db 0
+queueSize: db QUEUE_OFFSET_CAPACITY
 
 section .bss
 sockfd: resb 8
 queue: resb 8
-condvar: resb 8
 
 section .text
 _start:
-.initialize_pool:
-	mov r8, 0
-.pool:
+.initialize_queue:
+	mov rdi, 0
+	mov rax, SYS_brk
+	syscall
+	mov [queue], rax
+
+	mov rdi, rax
+	add rdi, QUEUE_OFFSET_CAPACITY
+	mov rax, SYS_brk
+	syscall
+
+.initialize_thread:
 	call thread        
-	inc r8
-	cmp r8, 5
-	je .socket
-	jmp .pool
 .socket:
 	; int socket(int domain, int type, int protocol)
 	mov rdi, AF_INET
@@ -104,13 +104,34 @@ _start:
 	jmp .accept
 
 enqueue:
+	mov r9, [queueSize]
+	cmp byte [queuePtr], r9b   ; check if queue is full
+	je .resize
+
 	xor rdx, rdx
 	mov dl, [queuePtr]	
 	mov [queue + rdx], r8	
 	inc byte [queuePtr]
-
-	call emit_signal
+.done_enqueue:
 	ret
+.resize:
+	mov r10, r8   ; preserve the RDI (element to be added to array)
+
+	mov rdi, 0
+	mov rax, SYS_brk
+	syscall
+
+	mov rdi, rax
+	add rdi, QUEUE_OFFSET_CAPACITY
+	mov rax, SYS_brk
+	syscall
+
+	mov r9, [queueSize]
+	add r9, QUEUE_OFFSET_CAPACITY
+	mov [queueSize], r9
+
+	mov rdi, r10
+	jmp enqueue
 
 dequeue:
 	xor rax, rax
@@ -137,29 +158,6 @@ dequeue:
 .return_dequeue:
 	ret
 
-emit_signal:
-   mov rdi, condvar
-   mov rsi, FUTEX_WAKE | FUTEX_PRIVATE_FLAG  ; the difference is in the FUTEX_WAKE flag
-   xor rdx, rdx
-   xor r10, r10
-   xor r8, r8
-   mov rax, SYS_futex
-   syscall
-   ret
-
-wait_condvar:
-   mov rdi, condvar           
-   mov rsi, FUTEX_WAIT | FUTEX_PRIVATE_FLAG 
-   xor rdx, rdx
-   xor r10, r10              
-   xor r8, r8               
-   mov rax, SYS_futex
-   syscall
-   test rax, rax
-   jz .done_condvar
-.done_condvar:
-   ret
-
 thread:
 	mov rdi, 0
 	mov rax, SYS_brk
@@ -178,30 +176,27 @@ thread:
 	syscall
 	ret
 
-handle:	
-	cmp byte [queuePtr], 0         
-	je .wait           
+handle:
+	cmp byte [queuePtr], 0
+	je handle
 
-	call dequeue      
-	mov r10, rax
+	call dequeue
+	mov r8, rax
 
 	lea rdi, [timespec]
 	mov rax, SYS_nanosleep
 	syscall
 
 	; int write(fd)
-	mov rdi, r10
+	mov rdi, r8
 	mov rsi, response
 	mov rdx, responseLen
 	mov rax, SYS_write
 	syscall
 
 	; int close(fd)
-	mov rdi, r10
+	mov rdi, r8
 	mov rax, SYS_close
 	syscall
 
-	jmp handle       
-.wait:
-	call wait_condvar 
-	jmp handle       
+	jmp handle

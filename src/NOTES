@@ -1,0 +1,2 @@
+ export TIMEFORMAT=%R; time echo {1..20} | xargs -n1 -P10 bash -c "export TIMEFORMAT=%R; time curl localhost:3000"
+
